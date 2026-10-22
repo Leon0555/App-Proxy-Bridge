@@ -2,9 +2,9 @@
 
 <p align="center"><img src="AppProxyBridge.App/Assets/logo.png" width="160" alt="App Proxy Bridge logo: multiple nodes converge at one hub and fan out again" /></p>
 
-Windows 按软件代理管理器，沿用 GPT Proxy Bridge 的 WPF 界面、主题、配置管理和 DPAPI 凭据存储。两个项目及其个人数据互相独立。
+Windows 按软件代理管理器.
 
-**当前为 0.1.0 开发预览，不能视为已完成实际流量接管验收。** 本机安全软件阻止官方 WinDivert SDK 压缩包解压，因此没有安装驱动、安装服务或让真实软件经过此工具。开发预览包缺少 WinDivert 运行组件时，会拒绝启用代理。
+**当前为 0.1.0 开发预览。**
 
 ## 使用方式
 
