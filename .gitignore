@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+.tools/
+.cache/
+release/
+artifacts/
+qa-data/
+*.user
+*.clixml
+*.pfx
+*.p12
+.env
+.env.*
