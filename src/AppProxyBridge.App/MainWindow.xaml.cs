@@ -27,6 +27,9 @@ public partial class MainWindow : Window, IDisposable
     ProxyProfile? selectedProfile;
     ApplicationEntry? selectedApp;
     bool loading = true, profileDirty, appDirty, busy, currentInputTested;
+    // Optional presenters let isolated UI tests exercise the same decisions without modal dialogs.
+    Func<string, string, MessageBoxResult>? confirmUnsaved = null;
+    Action<string>? presentError = null;
     public string Theme => config.Settings.Theme;
 
     public MainWindow(string directory)
@@ -83,7 +86,15 @@ public partial class MainWindow : Window, IDisposable
         if (DashboardPage.Visibility == Visibility.Visible) DashboardPage.Update(BuildDashboard());
     }
     void SetBusy(bool value) { busy = value; ContentArea.IsEnabled = !value; }
-    void ShowError(Exception ex) { MessageText.Text = ex.Message; MessageBox.Show(this, ex.Message, "操作未完成", MessageBoxButton.OK, MessageBoxImage.Warning); }
+    void ShowError(Exception ex, string? nextStep = null) {
+        string message = ex.Message + (nextStep == null ? "" : "\n\n" + nextStep);
+        MessageText.Text = message;
+        if (presentError != null) presentError(message);
+        else MessageBox.Show(this, message, "操作未完成", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+    MessageBoxResult AskUnsaved(string message, string title) => confirmUnsaved != null
+        ? confirmUnsaved(message, title)
+        : MessageBox.Show(this, message, title, MessageBoxButton.YesNoCancel, MessageBoxImage.Question, MessageBoxResult.Cancel);
     void ShowDashboard(object sender, RoutedEventArgs e) => ShowPage(DashboardPage);
     void ShowApps(object sender, RoutedEventArgs e) => ShowPage(ApplicationsPage);
     void ShowProfiles(object sender, RoutedEventArgs e) => ShowPage(ProfilesPage);
@@ -132,21 +143,25 @@ public partial class MainWindow : Window, IDisposable
         }
         loading = false; UpdateStatus();
     }
-    bool ProtectProfile()
+    bool ProtectProfile(bool forExit = false)
     {
         if (!profileDirty) return true;
-        var answer = MessageBox.Show(this, "代理配置尚未保存。保存后继续？", "未保存的修改", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (forExit) ShowPage(ProfilesPage);
+        string continuation = forExit ? "继续退出" : "继续当前操作";
+        var answer = AskUnsaved($"代理配置尚未保存。\n\n是：保存后{continuation}\n否：放弃未保存的修改后{continuation}\n取消：返回并继续编辑", "未保存的代理配置");
         if (answer == MessageBoxResult.Cancel) return false;
         if (answer == MessageBoxResult.No) { LoadProfile(config.Profiles.FirstOrDefault(p => p.Id == selectedProfile?.Id)); RefreshLists(); return true; }
-        return SaveProfileCore();
+        return SaveProfileCore(forExit);
     }
-    bool ProtectApp()
+    bool ProtectApp(bool forExit = false)
     {
         if (!appDirty) return true;
-        var answer = MessageBox.Show(this, "软件配置尚未保存。保存后继续？", "未保存的修改", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (forExit) ShowPage(ApplicationsPage);
+        string continuation = forExit ? "继续退出" : "继续当前操作";
+        var answer = AskUnsaved($"软件配置尚未保存。\n\n是：保存后{continuation}\n否：放弃未保存的修改后{continuation}\n取消：返回并继续编辑", "未保存的软件配置");
         if (answer == MessageBoxResult.Cancel) return false;
         if (answer == MessageBoxResult.No) { LoadApp(config.Applications.FirstOrDefault(a => a.Id == selectedApp?.Id)); RefreshLists(); return true; }
-        return SaveAppCore();
+        return SaveAppCore(forExit);
     }
     void ProfileSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -188,7 +203,7 @@ public partial class MainWindow : Window, IDisposable
         if (profile.Authentication && (string.IsNullOrEmpty(Password.Password) || System.Text.Encoding.UTF8.GetByteCount(Password.Password) > 255)) throw new ArgumentException("请输入密码，长度不能超过 255 个 UTF-8 字节。");
         return profile;
     }
-    bool SaveProfileCore()
+    bool SaveProfileCore(bool forExit = false)
     {
         try {
             var profile = ReadProfile() with { Revision = selectedProfile!.Revision + 1 };
@@ -196,7 +211,7 @@ public partial class MainWindow : Window, IDisposable
             var saved = store.SaveProfile(prospective, profile, Password.Password);
             config.Profiles = prospective.Profiles; selectedProfile = saved; profileDirty = false; RefreshLists(); LoadProfile(saved);
             MessageText.Text = "配置已保存；保存不等于应用。"; return true;
-        } catch (Exception ex) { ShowError(ex); return false; }
+        } catch (Exception ex) { ShowError(ex, forExit ? "请修正代理配置后重试，或再次退出时选择“否”放弃未保存的修改。" : null); return false; }
     }
     void SaveProfile(object sender, RoutedEventArgs e) => SaveProfileCore();
     async Task<ProbeResult> Probe(ProxyProfile profile, string password)
@@ -247,10 +262,10 @@ public partial class MainWindow : Window, IDisposable
         if (Independent.IsChecked == true && profile == null) throw new ArgumentException("请选择独立代理配置。");
         return selectedApp with { Name = AppName.Text.Trim(), Components = [new() { Path = path }], WorkingDirectory = directory, Arguments = AppArguments.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).ToList(), LaunchMethod = (LaunchMethod)LaunchMode.SelectedIndex, UseIndependentProxy = Independent.IsChecked == true, IndependentProfileId = Independent.IsChecked == true ? profile?.Id : null };
     }
-    bool SaveAppCore()
+    bool SaveAppCore(bool forExit = false)
     {
         try { var app = ReadApp(); var next = config with { Applications = config.Applications.Any(a => a.Id == app.Id) ? config.Applications.Select(a => a.Id == app.Id ? app : a).ToList() : config.Applications.Append(app).ToList() }; store.Save(next); config.Applications = next.Applications; selectedApp = app; appDirty = false; RefreshLists(); LoadApp(app); MessageText.Text = "软件配置已保存；端口或启动设置改变后，已有软件可能需要重启。"; return true; }
-        catch (Exception ex) { ShowError(ex); return false; }
+        catch (Exception ex) { ShowError(ex, forExit ? "请修正软件配置后重试，或再次退出时选择“否”放弃未保存的修改。" : null); return false; }
     }
     void SaveApplication(object sender, RoutedEventArgs e) => SaveAppCore();
     void BrowseApplication(object sender, RoutedEventArgs e) { var dialog = new OpenFileDialog { Filter = "可执行程序 (*.exe)|*.exe", CheckFileExists = true }; if (dialog.ShowDialog(this) == true) AppPath.Text = dialog.FileName; }
@@ -321,7 +336,8 @@ public partial class MainWindow : Window, IDisposable
     }
     public void StopAll() { if (busy) { MessageText.Text = "操作正在进行，请稍候。"; return; } bridges.StopAll(); MessageText.Text = "所有桥接已停止；对应连接会中断。"; UpdateStatus(); }
     void StopAllClick(object sender, RoutedEventArgs e) => StopAll();
-    public bool PrepareExit() { if (busy) { MessageBox.Show(this, "操作正在进行，请稍候。"); return false; } return ProtectProfile() && ProtectApp(); }
+    public bool HasPendingExitConfirmation => busy || profileDirty || appDirty;
+    public bool PrepareExit() { if (busy) { MessageBox.Show(this, "操作正在进行，请稍候。"); return false; } return ProtectProfile(true) && ProtectApp(true); }
     void WindowClosing(object? sender, CancelEventArgs e) { if (!((App)Application.Current).Exiting) { e.Cancel = true; Hide(); } }
     public void ApplyTitleBarTheme(bool dark)
     {

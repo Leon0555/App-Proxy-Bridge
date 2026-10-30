@@ -51,7 +51,13 @@ public partial class App : Application
     }
     void OnSystemThemeChanged(object sender, UserPreferenceChangedEventArgs e) => Dispatcher.InvokeAsync(() => { if (window != null) SetTheme(window.Theme); });
     void ShowWindow() { if (window == null) return; window.Show(); window.WindowState = WindowState.Normal; window.Activate(); }
-    public void ExitApp() { if (window != null && !window.PrepareExit()) return; Exiting = true; Shutdown(); }
+    public void ExitApp() {
+        if (window != null) {
+            if (window.HasPendingExitConfirmation && !window.IsVisible) { window.Show(); window.WindowState = WindowState.Normal; window.Activate(); }
+            if (!window.PrepareExit()) return;
+        }
+        Exiting = true; Shutdown();
+    }
     protected override void OnExit(ExitEventArgs e)
     {
         SystemEvents.UserPreferenceChanged -= OnSystemThemeChanged;

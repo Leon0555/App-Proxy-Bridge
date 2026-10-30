@@ -32,6 +32,32 @@ internal static class Program
             using var file = File.Create(Path.Combine(artifacts, name + ".png")); encoder.Save(file);
         }
         try {
+            var exitRoot = Path.Combine(Path.GetTempPath(), "AppProxyBridgeNext-exit-" + Guid.NewGuid().ToString("N"));
+            var exitWindow = new MainWindow(exitRoot);
+            try {
+                var decisions = new Queue<MessageBoxResult>();
+                string promptText = "", errorText = "";
+                typeof(MainWindow).GetField("confirmUnsaved", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(exitWindow,
+                    new Func<string, string, MessageBoxResult>((message, _) => { promptText = message; return decisions.Dequeue(); }));
+                typeof(MainWindow).GetField("presentError", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(exitWindow,
+                    new Action<string>(message => errorText = message));
+                void AddExitDraft() => typeof(MainWindow).GetMethod("AddApplication", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(exitWindow, [exitWindow, new RoutedEventArgs()]);
+                Check(exitWindow.PrepareExit(), "无未保存修改时允许退出");
+                AddExitDraft(); decisions.Enqueue(MessageBoxResult.Cancel);
+                Check(!exitWindow.PrepareExit() && exitWindow.HasPendingExitConfirmation, "取消退出时保留未完成的软件草稿");
+                Check(promptText.Contains("否：放弃未保存的修改后继续退出") && ((Grid)exitWindow.FindName("ApplicationsPage")).Visibility == Visibility.Visible, "退出提示明确不保存选项并显示相关页面");
+                decisions.Enqueue(MessageBoxResult.Yes);
+                Check(!exitWindow.PrepareExit() && errorText.Contains("请选择存在的 EXE 文件") && errorText.Contains("选择“否”"), "无效路径保存失败后说明如何放弃草稿退出");
+                Check(!File.Exists(Path.Combine(exitRoot, "profiles.json")) && exitWindow.HasPendingExitConfirmation, "保存失败不写入草稿且保留未保存状态");
+                decisions.Enqueue(MessageBoxResult.No);
+                Check(exitWindow.PrepareExit() && !exitWindow.HasPendingExitConfirmation && !File.Exists(Path.Combine(exitRoot, "profiles.json")), "选择不保存可退出且不写入新草稿");
+                AddExitDraft(); ((TextBox)exitWindow.FindName("AppPath")).Text = Environment.ProcessPath!;
+                decisions.Enqueue(MessageBoxResult.Yes);
+                Check(exitWindow.PrepareExit() && new ConfigurationStore(exitRoot).Load().Applications.Count == 1, "有效软件草稿可保存并退出");
+                ((TextBox)exitWindow.FindName("AppPath")).Text = "missing.exe";
+                decisions.Enqueue(MessageBoxResult.No);
+                Check(exitWindow.PrepareExit() && new ConfigurationStore(exitRoot).Load().Applications.Single().Components.Single().Path == Environment.ProcessPath, "放弃修改不删除或覆盖已保存软件");
+            } finally { exitWindow.Dispose(); if (Directory.Exists(exitRoot)) Directory.Delete(exitRoot, true); }
             app.SetTheme("Light"); Snapshot("dashboard-empty-light");
             Check(Field<DashboardView>("DashboardPage").Visibility == Visibility.Visible, "看板为默认首页");
             var emptyView = Field<DashboardView>("DashboardPage");
