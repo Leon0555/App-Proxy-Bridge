@@ -1,13 +1,6 @@
 **/bin/
 **/obj/
-.tools/
-.cache/
-release/
+.dotnet-cli/
 artifacts/
-qa-data/
-*.user
-*.clixml
-*.pfx
-*.p12
-.env
-.env.*
+release/
+

@@ -1,7 +1,0 @@
-<Solution>
-  <Project Path="AppProxyBridge.Core/AppProxyBridge.Core.csproj" />
-  <Project Path="AppProxyBridge.Service/AppProxyBridge.Service.csproj" />
-  <Project Path="AppProxyBridge.App/AppProxyBridge.App.csproj" />
-  <Project Path="AppProxyBridge.Tests/AppProxyBridge.Tests.csproj" />
-  <Project Path="AppProxyBridge.UiTests/AppProxyBridge.UiTests.csproj" />
-</Solution>

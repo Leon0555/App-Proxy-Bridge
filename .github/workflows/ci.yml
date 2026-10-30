@@ -1,4 +1,4 @@
-name: Windows build and checks
+name: Windows build and preview
 
 on:
   push:
@@ -12,22 +12,43 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Fetch verified build tool
+      - name: Core regression checks
+        run: dotnet run --project tests/AppProxyBridge.Core.Tests -c Release
+      - name: WPF regression checks
+        run: dotnet run --project tests/AppProxyBridge.UiTests -c Release
+      - name: Build self-contained preview
         shell: pwsh
-        run: ./bootstrap.ps1
-      - name: Build and run driver-free regression checks
-        shell: pwsh
-        run: ./build.ps1 -Test -UiTest
-      - name: Save interface previews
-        if: always()
-        uses: actions/upload-artifact@v4
+        run: ./build.ps1
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == '全面重构 0.9.0'
         with:
-          name: interface-previews
-          path: artifacts/previews/*.png
-          if-no-files-found: ignore
+          name: app-proxy-bridge-preview
+          path: |
+            release/App-Proxy-Bridge-0.9.0-win-x64.zip
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == '全面重构 0.9.0'
+    needs: windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-proxy-bridge-preview
+          path: release
+      - name: Publish 0.9.0 preview
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.9.0 release/App-Proxy-Bridge-0.9.0-win-x64.zip release/SHA256SUMS.txt --target $env:GITHUB_SHA --title 'v0.9.0' --notes '全面重构。' --prerelease
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+

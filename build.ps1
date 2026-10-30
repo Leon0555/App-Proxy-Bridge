@@ -1,37 +1,38 @@
-param([switch]$Test,[switch]$UiTest,[switch]$Installed,[switch]$Publish,[switch]$Installer,[switch]$Preview,[switch]$Smoke)
-$ErrorActionPreference='Stop'
-$env:DOTNET_CLI_TELEMETRY_OPTOUT='1'
-$env:DOTNET_NOLOGO='1'
-$env:DOTNET_GENERATE_ASPNET_CERTIFICATE='false'
-if($Installed){$UiTest=$true}
-if($Smoke){$Publish=$true}
-$sdk=Join-Path (Split-Path $PSScriptRoot -Parent) '.dotnet\dotnet.exe'
-if(-not(Test-Path $sdk)){$sdk=(Get-Command dotnet).Source}
-$env:DOTNET_CLI_HOME=Join-Path $PSScriptRoot '.cache\dotnet'
-$env:DOTNET_ROOT=Split-Path $sdk -Parent
-function Dotnet([string[]]$Arguments){& $sdk @Arguments;if($LASTEXITCODE){throw "dotnet failed: $($Arguments[0])"}}
-& (Join-Path $PSScriptRoot 'native\build.ps1')
-if($LASTEXITCODE){throw 'Native build failed'}
-foreach($project in @('App','Service','Tests','UiTests')){Dotnet @('build',(Join-Path $PSScriptRoot "AppProxyBridge.$project\AppProxyBridge.$project.csproj"),'-c','Release','--nologo')}
-if($Test){
-    $env:APB_NATIVE=Join-Path $PSScriptRoot 'artifacts\native\AppProxyBridgeNative.dll'
-    Dotnet @('run','--project',(Join-Path $PSScriptRoot 'AppProxyBridge.Tests\AppProxyBridge.Tests.csproj'),'-c','Release','--no-build')
+param([switch]$NoRestore)
+
+$ErrorActionPreference = 'Stop'
+$root = $PSScriptRoot
+$releaseDir = Join-Path $root 'release'
+$stage = Join-Path $root ('artifacts\package-0.9.0-' + [guid]::NewGuid().ToString('N'))
+$publishDir = Join-Path $stage 'App-Proxy-Bridge-0.9.0-win-x64'
+$zip = Join-Path $releaseDir 'App-Proxy-Bridge-0.9.0-win-x64.zip'
+$checksums = Join-Path $releaseDir 'SHA256SUMS.txt'
+
+New-Item -ItemType Directory -Path $publishDir, $releaseDir -Force | Out-Null
+try {
+    $publishArgs = @('publish', (Join-Path $root 'src\AppProxyBridge.App\AppProxyBridge.App.csproj'), '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-o', $publishDir)
+    if ($NoRestore) { $publishArgs += '--no-restore' }
+    & dotnet @publishArgs
+    if ($LASTEXITCODE -ne 0) { throw '发布构建失败。' }
+    Get-ChildItem -LiteralPath $publishDir -Filter '*.pdb' -File | Remove-Item -Force
+    Copy-Item -LiteralPath (Join-Path $root 'LICENSE'), (Join-Path $root 'THIRD-PARTY-NOTICES.md') -Destination $publishDir
+    @'
+App Proxy Bridge 0.9.0 开发预览
+
+运行 App Proxy Bridge.exe。程序通过软件支持的环境变量或启动参数使用本地代理，并非全流量透明代理。
+真实目标软件兼容性、干净系统和安装升级尚未完成验收。此预览未签名。
+'@ | Set-Content -LiteralPath (Join-Path $publishDir '开发预览说明.txt') -Encoding UTF8
+    Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zip -CompressionLevel Optimal -Force
+    $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText($checksums, "$hash  $([IO.Path]::GetFileName($zip))`n", [Text.UTF8Encoding]::new($false))
+    Write-Host "预览包：$zip"
+    Write-Host "校验文件：$checksums"
+} finally {
+    if (Test-Path -LiteralPath $stage) {
+        $resolvedStage = (Resolve-Path -LiteralPath $stage).Path
+        $resolvedArtifacts = (Resolve-Path -LiteralPath (Join-Path $root 'artifacts')).Path.TrimEnd('\') + '\'
+        if (-not $resolvedStage.StartsWith($resolvedArtifacts, [StringComparison]::OrdinalIgnoreCase)) { throw '拒绝清理项目目录之外的构建文件。' }
+        Remove-Item -LiteralPath $resolvedStage -Recurse -Force
+    }
 }
-if($UiTest){$uiArgs=@('run','--project',(Join-Path $PSScriptRoot 'AppProxyBridge.UiTests\AppProxyBridge.UiTests.csproj'),'-c','Release','--no-build','--',(Join-Path $PSScriptRoot 'artifacts\previews'));if($Installed){$uiArgs+='--installed'};Dotnet $uiArgs}
-if($Publish -or $Installer){
-    $out=Join-Path $PSScriptRoot 'release\app'
-    foreach($project in @('App','Service')){Dotnet @('publish',(Join-Path $PSScriptRoot "AppProxyBridge.$project\AppProxyBridge.$project.csproj"),'-c','Release','-r','win-x64','--self-contained','true','--ignore-failed-sources','-p:NuGetAudit=false','-p:PublishSingleFile=true','-p:IncludeNativeLibrariesForSelfExtract=true','-p:DebugType=None','-p:DebugSymbols=false','-o',$out)}
-    Copy-Item (Join-Path $PSScriptRoot 'artifacts\native\AppProxyBridgeNative.dll') $out -Force
-    foreach($name in @('README.md','LICENSE','THIRD-PARTY-NOTICES.md','VERIFICATION.md')){Copy-Item (Join-Path $PSScriptRoot $name) $out -Force}
-    Copy-Item (Join-Path $PSScriptRoot 'vendor\WinDivert\LICENSE') (Join-Path $out 'LICENSE-WinDivert.txt') -Force
-    Copy-Item (Join-Path $PSScriptRoot 'vendor\ProxyBridge\LICENSE') (Join-Path $out 'LICENSE-ProxyBridge.txt') -Force
-    foreach($name in @('LICENSE.txt','ThirdPartyNotices.txt')){if(Test-Path (Join-Path $env:DOTNET_ROOT $name)){Copy-Item (Join-Path $env:DOTNET_ROOT $name) (Join-Path $out ('DOTNET-'+$name)) -Force}}
-    $wd=Join-Path $PSScriptRoot '.tools\WinDivert-2.2.2-A\x64'
-    if((Test-Path (Join-Path $wd 'WinDivert.dll')) -and (Test-Path (Join-Path $wd 'WinDivert64.sys'))){
-        $sig=Get-AuthenticodeSignature (Join-Path $wd 'WinDivert64.sys');if($sig.Status -ne 'Valid'){throw 'WinDivert driver signature is not valid.'}
-        foreach($name in @('WinDivert.dll','WinDivert64.sys')){Copy-Item (Join-Path $wd $name) $out -Force}
-    }elseif(-not $Preview){throw 'Official signed WinDivert runtime unavailable. Production packaging stopped. -Preview builds an explicitly incomplete developer preview.'}
-    if($Preview){'DEVELOPER PREVIEW: WinDivert runtime may be absent. Traffic interception has not been accepted. See VERIFICATION.md.' | Set-Content (Join-Path $out 'DEVELOPER-PREVIEW.txt')}
-    if($Installer){& (Join-Path $PSScriptRoot 'installer\build-msi.ps1') -Payload $out -Preview:$Preview;& (Join-Path $PSScriptRoot 'installer\verify-msi.ps1') -Msi (Join-Path $PSScriptRoot ('release\App-Proxy-Bridge-0.1.0-win-x64'+$(if($Preview){'-preview'})+'.msi')) -Payload $out}
-    if($Smoke){Dotnet @('run','--project',(Join-Path $PSScriptRoot 'AppProxyBridge.UiTests\AppProxyBridge.UiTests.csproj'),'-c','Release','--no-build','--','--published',$out)}
-}
+

@@ -1,65 +1,49 @@
 # App Proxy Bridge
 
-<p align="center"><img src="AppProxyBridge.App/Assets/logo.png" width="160" alt="App Proxy Bridge logo: multiple nodes converge at one hub and fan out again" /></p>
+Windows 桌面代理管理工具的开发预览。通过本地 HTTP 桥接和目标软件支持的启动参数或环境变量，连接用户提供的 HTTP、HTTPS 或 SOCKS5 上游代理。
 
-Windows 按软件代理管理器.
+**当前为 0.9.0 开发预览，不是正式发布版。** 已验证模拟代理和隔离测试程序，尚未在真实 Claude Code、Hermes、Grok Bot 或 Discord 上完成验收；不能保证软件的全部流量经代理。没有使用或安装驱动。
 
-**当前为 0.1.0 开发预览。**
+![软件配置界面（模拟数据）](docs/images/software-dark.png)
 
-## 使用方式
+## 基本使用
 
-完整安装包安装后台服务后，普通权限运行界面。添加 EXE、正在运行的软件或开始菜单应用，在软件列表勾选需要代理的条目。辅助 EXE 单独添加到同一条目；不会自动代理全部子进程。
+1. 默认首页是看板，展示软件、本地入口与代理配置。选择节点可以查看详情并跳转到对应页面。
+2. 在“代理配置”中新增并保存配置；“测试连接”针对当前输入，应用共享代理前会再次测试。
+3. 在“软件”中添加 EXE，选择它支持的启动方式。默认使用共享代理；需要不同上游时，勾选“为此软件使用独立代理”并选择配置。
+4. 在配置页应用共享代理，或在软件页应用独立代理，然后启动目标软件。目标软件必须主动遵循相应环境变量或启动参数。
+5. 切换代理仅影响新连接；已有连接保留原上游。切换共享/独立入口或更改端口时，目标软件通常需要重新启动。本工具不会强制关闭目标软件。
 
-在“代理配置”保存 HTTP、HTTPS 或 SOCKS5 配置，再点击“应用更改 / 启用代理”。多个软件共用一个生效配置。保存与应用分开，切换代理配置不会改变软件勾选。
+看板每两秒更新。虚线代表已保存的配置关系，实线代表入口实际生效的上游；入口连接数包含正在建立的连接。共享端口的连接不能可靠归属到某个软件，软件运行也不代表其全部流量已经通过代理。最近错误只保留在本次运行的内存中，重启后清除；不记录密码或目标地址。
 
-已建立的连接保留原路径；首次接入时，让软件重新连接。代理切换后旧代理连接保留其原网关，新连接使用新配置。HTTP/HTTPS 或不支持 UDP 的 SOCKS5 上游会阻止已选软件的 UDP，不回退直连。
+关闭窗口收至托盘；通过托盘可打开窗口、停止所有桥接或退出。停止桥接会断开使用对应入口的连接；目标软件之后是否直连取决于它自身，程序不承诺防直连。
 
-关闭窗口后保持托盘运行；停止或退出会关闭代理连接并释放接管。服务开机启动时待机，手动启用代理。整个引擎退出后恢复系统联网，不提供持续防直连机制。
+共享入口默认监听 `127.0.0.1:7996`，独立入口首次启用时自动分配端口并保存。所有监听仅绑定本机回环地址，但其他本机程序仍可能连接这些端口。端口被占用时显示错误，不接管已有程序。
 
-不修改系统代理、系统 DNS 或默认路由。安装时仅为本工具的转发端口添加指定防火墙规则。共享系统 DNS、共享后台服务、未添加组件和不能确定归属的流量不保证经代理。
+目标程序当前只接受 EXE 完整路径；不自动识别或保证 MSIX 激活、`.cmd` 包装器、后台服务、已有实例、远程环境、UDP、云端 Agent、浏览器其他实例或应用自行忽略代理设置的流量。Chromium 启动模式是通用参数方案，具体软件仍须实测。
 
-## 数据
+## 数据与安全
 
-个人数据：`%LOCALAPPDATA%\AppProxyBridge`。配置格式版本 2；软件列表全局保存，代理密码使用当前用户 DPAPI 加密。服务通信版本 1，通过本机命名管道进行，限制为安装用户；不接受远程连接。
+个人数据独立保存在 `%LOCALAPPDATA%\AppProxyBridge.Next`，不读取或覆盖旧版数据。密码使用当前 Windows 用户 DPAPI 加密，普通配置和进程启动参数不包含上游密码。HTTP 上游认证不会为上游链路提供加密；HTTPS 上游保留证书验证。
 
-“导入旧项目配置”选择原 GPT Proxy Bridge 的 `profiles.json`，在相同用户下读取并重新加密密码，不修改旧文件。不能解密的密码需要重新填写。导出包含代理地址、用户名及软件路径，不含密码。
+程序不修改 Windows 系统代理、DNS 或默认路由，不是 VPN，也不保证强制代理或网络隔离。文档、截图与测试使用模拟数据，不应公开真实代理地址、账号或密码。
 
-服务为单用户控制；安装者 SID 写入 `HKLM\SOFTWARE\AppProxyBridge\OwnerSid`。当前版本不支持多用户同时配置，也不允许界面通过服务启动任意程序。目标程序由普通权限界面启动。
+## 运行与开发
 
-## 开发与构建
+从 [GitHub Releases](https://github.com/Leon0555/App-Proxy-Bridge/releases) 下载 Windows x64 自包含预览包，解压后运行 `App Proxy Bridge.exe`，无需另外安装 .NET 运行时。请保留解压目录中的配套文件。若旧版预览仍在运行，请先从其托盘菜单正常退出。新旧项目使用不同的数据目录，新版本不会自动导入旧配置。此构建尚未在干净电脑上验证，未进行代码签名。
 
-要求 Windows 10/11 x64、.NET 10 SDK、PowerShell 7。便携 C 编译器 Zig 0.14.1 只放在项目 `.tools` 下，SHA256 校验后使用。
-
-```powershell
-./bootstrap.ps1
-./build.ps1 -Test -UiTest
-./build.ps1 -Publish -Installer -Preview
-```
-
-常规测试使用模拟代理、独立临时配置和延迟加载的原生 DLL，不安装或启用驱动，不读取个人代理凭据。WPF 测试需要交互式 Windows 桌面。预览图位于 `artifacts/previews`。
-
-正式打包需要官方签名的 WinDivert 2.2.2-A x64 SDK，在符合本机安全策略的环境中运行 `./bootstrap.ps1 -FetchWinDivert` 获取。脚本不更改安全软件设置。正式打包命令不带 `-Preview`；缺少驱动或签名无效会停止：
+需要 .NET 10 SDK 构建：
 
 ```powershell
-./build.ps1 -Test -UiTest -Publish -Installer
+dotnet build src/AppProxyBridge.App -c Release
+dotnet run --project tests/AppProxyBridge.Core.Tests -c Release
+dotnet run --project tests/AppProxyBridge.UiTests -c Release
+./build.ps1
 ```
 
-MSI 使用 Windows Installer 数据库和系统 makecab 创建，不自动执行安装。安装时创建本项目服务、防火墙规则和开始菜单快捷方式；卸载删除这些资源，保留用户配置。WinDivert 运行时按其官方机制加载；本项目不停止、删除或修复其他工具的共享 WinDivert 服务。
+核心测试使用本机模拟代理和临时配置；WPF 检查使用临时配置生成模拟界面截图。测试不应读取用户的代理配置或启动真实目标程序。开发及验证记录见 [docs/设计与实施记录.md](docs/设计与实施记录.md)。
 
-## 实现与限制
+## 许可证
 
-- Core：配置、上游握手、不可变本地 SOCKS5 网关、原生接口、版本化管道通信。
-- Service：Windows 服务托管、单用户管道访问控制、安装辅助操作。
-- App：WPF/MVVM、软件发现、MSIX 稳定身份解析、普通权限启动、主题与托盘。
-- native/vendor：固定版本开源内核及适配；构建时不从网络拉取最新代码。
-- Tests/UiTests：网络模拟、路径规则、凭据与协议、WPF 及服务通信回归。
+本项目及复用的 GPT Proxy Bridge、原 App Proxy Bridge 代码按 [MIT License](LICENSE) 分发，具体来源见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
-每次应用代理会建立新的不可变网关，旧网关在停止时统一释放；一次连续运行最多 1024 个配置版本，达到后保留当前配置并要求停止后重新启用。实时连接最多展示 400 条，事件最近 500 条。
-
-上游 TLS 拒绝无效证书；UDP 协商成功仅说明 ASSOCIATE 成功，实际通路需要数据往返验证。保护进程、网络共享代理服务、同一 UDP socket 多目标高并发、第三方驱动共存及长期负载仍需实机验收。MSIX 路径在界面刷新及每 30 秒检查时重新解析；界面完全退出后不会继续执行包更新发现。
-
-具体通过项目和未验证范围见 [VERIFICATION.md](VERIFICATION.md)。项目为独立第三方工具，不提供节点、订阅或 VPN 服务。
-
-## 许可
-
-本项目原创部分以 [MIT License](LICENSE) 开源。复用的 ProxyBridge、GPT Proxy Bridge 代码保留其 MIT 声明；WinDivert 按其 LGPLv3/GPLv2 双重许可分发，不因本项目采用 MIT 而更改。完整说明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
